@@ -10,6 +10,7 @@ import argparse
 import os.path
 from ftplib import FTP
 import re
+import json
 
 import EnaSqlite
 import GetMetadata
@@ -17,9 +18,8 @@ import GetMetadata
 rand = random.Random()
 
 ## ENA user variables
-user = "typning@ssi.dk"
-password = "OpMedData!"
-centre_name = "SSI"
+with open("user.conf","r") as fh:
+    user_variables = json.load(fh)
 ena_checklist = "ERC000028"
 
 ## ENA url
@@ -95,7 +95,8 @@ class Project:
                 self.projectxml.format(**self.params)),
             'SUBMISSION':io.StringIO(
                 submissionxml['add'])},
-                          auth=(user, password))
+                          auth=(user_variables['user'],
+                                user_variables['password']))
         if args.verbose:
             print("Received reply:")
             print(r.text)
@@ -110,7 +111,8 @@ class Project:
     def cancel(self):
         self.r = requests.post(ena_url, files={
             'SUBMISSION':io.StringIO(submissionxml['cancel'].format(self.params))},
-                               auth=(user, password))
+                          auth=(user_variables['user'],
+                                user_variables['password']))
         self.receipt = ET.fromstring(r.text)
         return self.receipt.get('success')=="true"
         
@@ -128,7 +130,7 @@ class SampleSet:
         else:
             sample_name.append(tv_element("SCIENTIFIC_NAME",taxon_id_or_name))
         sampleattributes=ET.SubElement(sample, "SAMPLE_ATTRIBUTES")
-        self.checkmetadata(sample_attributes,ena_checklist)
+        #self.checkmetadata(sample_attributes,ena_checklist)
         for tag,value in sample_attributes.items():
             sample_attribute = ET.SubElement(sampleattributes,"SAMPLE_ATTRIBUTE")
             sample_attribute.append(tv_element("TAG",tag))
@@ -166,7 +168,9 @@ class SampleSet:
 
         r = requests.post(ena_url, files={
             'SAMPLE':io.StringIO(ET.tostring(self.et,encoding="unicode")),
-            'SUBMISSION':io.StringIO(submissionxml['add'])}, auth=(user, password))
+            'SUBMISSION':io.StringIO(submissionxml['add'])},
+                          auth=(user_variables['user'],
+                                user_variables['password']))
         if args.verbose:
             print("Received reply:")
             print(r.text)
@@ -207,7 +211,9 @@ class ExperimentSet:
             print(ET.tostring(self.et,encoding="unicode"))
         r = requests.post(ena_url, files={
             'EXPERIMENT':io.StringIO(ET.tostring(self.et,encoding="unicode")),
-            'SUBMISSION':io.StringIO(submissionxml['add'])}, auth=(user, password))
+            'SUBMISSION':io.StringIO(submissionxml['add'])},
+                          auth=(user_variables['user'],
+                                user_variables['password']))
         if args.verbose:
             print("Received reply:")
             print(r.text)
@@ -247,7 +253,9 @@ class RunSet:
             print(ET.tostring(self.et,encoding="unicode"))
         r = requests.post(ena_url, files={
             'RUN':io.StringIO(ET.tostring(self.et,encoding="unicode")),
-            'SUBMISSION':io.StringIO(submissionxml['add'])}, auth=(user, password))
+            'SUBMISSION':io.StringIO(submissionxml['add'])},
+                          auth=(user_variables['user'],
+                                user_variables['password']))
         if args.verbose:
             print("Received reply:")
             print(r.text)
@@ -273,7 +281,9 @@ class enaftp:
 
     def connect(self):
         self.ftp = FTP(self.url)
-        self.ftp.login(user, password)
+        self.ftp.login(
+            user_variables['user'],
+            user_variables['password'])
 
     def upload(self, f):
         with open(f.path,'rb') as fh:
@@ -284,12 +294,20 @@ class enaftp:
     def disconnect(self):
         self.ftp.quit()
 
-
+def parse_config_file(config_file):
+    files = list()
+    for line in config_file:
+        if line.startswith('#'):
+            continue
+        files.append(list(map(fqfile,line.strip().split("\t"))))
+    return files
+    
 def parse_arguments():
     parser=argparse.ArgumentParser(description="Upload to ENA")
     parser.add_argument('config_file',type=argparse.FileType()) 
     parser.add_argument('--new-project',action="store_true",help="Create a new project")
     parser.add_argument('-v','--verbose',action="store_true",help="Verbose output")
+    parser.add_argument('--no-fastq',action='store_true', help="Don't upload fastqs")
     parser.add_argument('--project', type=str,help="Project name",
                         default = "SSI_"+str(time.localtime().tm_year))
     return parser.parse_args()
@@ -319,35 +337,29 @@ if __name__ == "__main__":
 
     ## Submit samples
     samples = SampleSet()
-    experiments = ExperimentSet(project.alias, centre_name)
-    runs = RunSet(centre_name)
-    files = list()
-    for line in args.config_file:
-        files.append(list(map(fqfile,line.strip().split("\t"))))
-    ftp = enaftp()
-    ftp.connect()
+    experiments = ExperimentSet(project.alias, user_variables['centre_name'])
+    runs = RunSet(user_variables['centre_name'])
+    files = parse_config_file(args.config_file)
+    if not args.no_fastq:
+        ftp = enaftp()
+        ftp.connect()
+        for pair in files:
+            for f in pair:
+                ftp.upload(f)
+        ftp.disconnect()
     for pair in files:
         alias = pair[0].alias
-        for f in pair:
-            ftp.upload(f)
         samples.add_sample(alias,
                            alias,
                            28901,
                            GetMetadata.getmetadata(alias))
         experiments.add_experiment(alias)
         runs.add_run(alias,pair)
-    ftp.disconnect()
     print("Submitting samples: success={}".format(samples.submit()))
     print("Submitting experiments: success={}".format(experiments.submit()))
     print("Submitting runs: success={}".format(runs.submit()))
 
     db.commit()
     
-    # ## Cancel the study when done -- not really necessary, but was a good exercise
-    # xml = cancel_project_at_ena(project_accession)
-    # print(xml)
-    # receipt = parse_cancel_project_receipt(xml)
-    # assert(receipt['success'] == "true")
-    # print(receipt)
 
 
