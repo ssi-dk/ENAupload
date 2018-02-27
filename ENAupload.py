@@ -17,9 +17,9 @@ import GetMetadata
 rand = random.Random()
 
 ## ENA user variables
-user = "typning@ssi.dk"
-password = "OpMedData!"
-centre_name = "SSI"
+user = "xxxx"
+password = "xxxx"
+centre_name = "xxxx"
 ena_checklist = "ERC000028"
 
 ## ENA url
