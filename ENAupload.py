@@ -32,6 +32,9 @@ submissionxml = dict(add="""<?xml version="1.0" encoding="UTF-8"?>
       <ACTION>
          <ADD/>
       </ACTION>
+      <ACTION>
+         <HOLD holduntil="{releasedate}">
+      </ACTION>
    </ACTIONS>
 </SUBMISSION>
 """,
@@ -60,6 +63,8 @@ class fqfile:
         self.md5 = m.hexdigest()
         self.alias = self.name.split('_')[0]
 
+    def __str__(self):
+        return "Path:{}\nName:{}\nAlias:{}\nMD5:{}".format(self.path,self.name,self.alias,self.md5)
 
 
 class Project:
@@ -85,7 +90,10 @@ class Project:
         self.params = {'alias':alias,
                        'title':title,
                        'description':description,
-                       'accession':accession}
+                       'accession':accession,
+                       'releasedate':2019}
+        ## Decide exactly what to do about the release date
+        #  All project objects are released when the project is released, but 
     def submit(self):
         if args.verbose:
             print("Sending to {}:".format(ena_url))
@@ -242,7 +250,9 @@ class RunSet:
         data_block = ET.SubElement(run,"DATA_BLOCK")
         files = ET.SubElement(data_block,"FILES")
         for f in file_list:
-            ET.SubElement(files, "FILE", {'filename':f.path,
+            if args.verbose:
+                print(f)
+            ET.SubElement(files, "FILE", {'filename':f.name,
                                           'filetype':"fastq",
                                           'checksum_method':'MD5',
                                           'checksum':f.md5})
