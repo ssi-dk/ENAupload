@@ -20,7 +20,7 @@ rand = random.Random()
 ## ENA user variables
 with open("user.conf","r") as fh:
     user_variables = json.load(fh)
-ena_checklist = "ERC000028"
+ena_checklist = "ERC000029"
 
 ## ENA url
 ena_url = "https://wwwdev.ebi.ac.uk/ena/submit/drop-box/submit/"
@@ -294,9 +294,9 @@ class enaftp:
     def disconnect(self):
         self.ftp.quit()
 
-def parse_config_file(config_file):
+def parse_fastq_list(fastq_list):
     files = list()
-    for line in config_file:
+    for line in fastq_list:
         if line.startswith('#'):
             continue
         files.append(list(map(fqfile,line.strip().split("\t"))))
@@ -304,7 +304,8 @@ def parse_config_file(config_file):
     
 def parse_arguments():
     parser=argparse.ArgumentParser(description="Upload to ENA")
-    parser.add_argument('config_file',type=argparse.FileType()) 
+    parser.add_argument('fastq_list',type=argparse.FileType('r'))
+    parser.add_argument('--isolateinfo',type=argparse.FileType('r'))
     parser.add_argument('--new-project',action="store_true",help="Create a new project")
     parser.add_argument('-v','--verbose',action="store_true",help="Verbose output")
     parser.add_argument('--no-fastq',action='store_true', help="Don't upload fastqs")
@@ -339,7 +340,8 @@ if __name__ == "__main__":
     samples = SampleSet()
     experiments = ExperimentSet(project.alias, user_variables['centre_name'])
     runs = RunSet(user_variables['centre_name'])
-    files = parse_config_file(args.config_file)
+    files = parse_fastq_list(args.fastq_list)
+    metadata = GetMetadata.metadata(args.isolateinfo, ena_checklist)
     if not args.no_fastq:
         ftp = enaftp()
         ftp.connect()
@@ -352,7 +354,7 @@ if __name__ == "__main__":
         samples.add_sample(alias,
                            alias,
                            28901,
-                           GetMetadata.getmetadata(alias))
+                           metadata.get(alias))
         experiments.add_experiment(alias)
         runs.add_run(alias,pair)
     print("Submitting samples: success={}".format(samples.submit()))
