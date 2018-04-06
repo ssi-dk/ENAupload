@@ -26,19 +26,17 @@ ena_checklist = "ERC000029"
 ena_url = "https://wwwdev.ebi.ac.uk/ena/submit/drop-box/submit/"
 
 ## Basic XML forms
-submissionxml = dict(add="""<?xml version="1.0" encoding="UTF-8"?>
+submissionxml = dict(
+    add="""<?xml version="1.0" encoding="UTF-8"?>
 <SUBMISSION>
    <ACTIONS>
       <ACTION>
          <ADD/>
       </ACTION>
-      <ACTION>
-         <HOLD holduntil="{releasedate}">
-      </ACTION>
    </ACTIONS>
 </SUBMISSION>
 """,
-cancel="""<?xml version="1.0" encoding="UTF-8"?>
+    cancel="""<?xml version="1.0" encoding="UTF-8"?>
 <SUBMISSION>
    <ACTIONS>
       <ACTION>
@@ -47,6 +45,10 @@ cancel="""<?xml version="1.0" encoding="UTF-8"?>
    </ACTIONS>
 </SUBMISSION>
 """)
+hold="""
+      <ACTION>
+         <HOLD holduntil="{releasedate}">
+      </ACTION>"""
 
 ## sqlite setup
 
@@ -72,7 +74,8 @@ class Project:
                  alias="myAlias",
                  title="myTitle",
                  description="myDescription",
-                 accession=None):
+                 accession=None,
+                 releasedate="{}-01-01".format(time.localtime().tm_year+1)):
         self.projectxml = """<?xml version = '1.0' encoding = 'UTF-8'?>
         <PROJECT_SET>
            <PROJECT alias="{alias}">
@@ -85,27 +88,36 @@ class Project:
         </PROJECT_SET>
 """
         self.alias=alias
+        self.releasedate = releasedate
         if accession is None:
             accession = db.get_project_accession(alias)
         self.params = {'alias':alias,
                        'title':title,
                        'description':description,
-                       'accession':accession,
-                       'releasedate':2019}
+                       'accession':accession}
         ## Decide exactly what to do about the release date
         #  All project objects are released when the project is released, but 
     def submit(self):
         if args.verbose:
             print("Sending to {}:".format(ena_url))
             print(self.projectxml.format(**self.params))
+        ## Create submission XML
+        submit = ET.Element('SUBMISSION')
+        actions = ET.SubElement(submit, "ACTIONS")
+        addaction = ET.SubElement(actions, "ACTION")
+        ET.SubElement(addaction, "ADD")
+        if self.releasedate is not None:
+            holdaction = ET.SubElement(actions, "ACTION")
+            ET.SubElement(holdaction, "HOLD", {'HoldUntilDate': self.releasedate})
         r = requests.post(ena_url, files={
             'PROJECT':io.StringIO(
                 self.projectxml.format(**self.params)),
             'SUBMISSION':io.StringIO(
-                submissionxml['add'])},
+                ET.tostring(submit, encoding="unicode"))},
                           auth=(user_variables['user'],
                                 user_variables['password']))
         if args.verbose:
+            print(ET.tostring(submit, encoding="unicode"))
             print("Received reply:")
             print(r.text)
         self.receipt = ET.fromstring(r.text)
@@ -123,11 +135,12 @@ class Project:
                                 user_variables['password']))
         self.receipt = ET.fromstring(r.text)
         return self.receipt.get('success')=="true"
-        
+
 
 class SampleSet:
-    def __init__(self):
+    def __init__(self, releasedate):
         self.et = ET.Element("SAMPLE_SET")
+        self.releasedate = releasedate
 
     def add_sample(self,alias, title, taxon_id_or_name, sample_attributes):
         db.add_sample(alias)
@@ -167,16 +180,21 @@ class SampleSet:
             else:
                 if field.find('MANDATORY').text == "mandatory":
                     return False
-                    
-                    
+
     def submit(self):
         if args.verbose:
             print("Sending to {}:".format(ena_url))
             print(ET.tostring(self.et,encoding="unicode"))
-
+        submit = ET.Element('SUBMISSION')
+        actions = ET.SubElement(submit, "ACTIONS")
+        addaction = ET.SubElement(actions, "ACTION")
+        ET.SubElement(addaction, "ADD")
+        if self.releasedate is not None:
+            holdaction = ET.SubElement(actions, "ACTION")
+            ET.SubElement(holdaction, "HOLD", {'HoldUntilDate': self.releasedate})
         r = requests.post(ena_url, files={
             'SAMPLE':io.StringIO(ET.tostring(self.et,encoding="unicode")),
-            'SUBMISSION':io.StringIO(submissionxml['add'])},
+            'SUBMISSION':io.StringIO(ET.tostring(submit,encoding="unicode"))},
                           auth=(user_variables['user'],
                                 user_variables['password']))
         if args.verbose:
@@ -217,9 +235,13 @@ class ExperimentSet:
         if args.verbose:
             print("Sending to {}:".format(ena_url))
             print(ET.tostring(self.et,encoding="unicode"))
+        submit = ET.Element('SUBMISSION')
+        actions = ET.SubElement(submit, "ACTIONS")
+        addaction = ET.SubElement(actions, "ACTION")
+        ET.SubElement(addaction, "ADD")
         r = requests.post(ena_url, files={
             'EXPERIMENT':io.StringIO(ET.tostring(self.et,encoding="unicode")),
-            'SUBMISSION':io.StringIO(submissionxml['add'])},
+            'SUBMISSION':io.StringIO(ET.tostring(submit,encoding="unicode"))},
                           auth=(user_variables['user'],
                                 user_variables['password']))
         if args.verbose:
@@ -252,7 +274,7 @@ class RunSet:
         for f in file_list:
             if args.verbose:
                 print(f)
-            ET.SubElement(files, "FILE", {'filename':f.name,
+            ET.SubElement(files, "FILE", {'filename':"fastqs/"+f.name,
                                           'filetype':"fastq",
                                           'checksum_method':'MD5',
                                           'checksum':f.md5})
@@ -261,9 +283,13 @@ class RunSet:
         if args.verbose:
             print("Sending to {}:".format(ena_url))
             print(ET.tostring(self.et,encoding="unicode"))
+        submit = ET.Element('SUBMISSION')
+        actions = ET.SubElement(submit, "ACTIONS")
+        addaction = ET.SubElement(actions, "ACTION")
+        ET.SubElement(addaction, "ADD")
         r = requests.post(ena_url, files={
             'RUN':io.StringIO(ET.tostring(self.et,encoding="unicode")),
-            'SUBMISSION':io.StringIO(submissionxml['add'])},
+            'SUBMISSION':io.StringIO(ET.tostring(submit,encoding="unicode"))},
                           auth=(user_variables['user'],
                                 user_variables['password']))
         if args.verbose:
@@ -316,6 +342,7 @@ def parse_arguments():
     parser=argparse.ArgumentParser(description="Upload to ENA")
     parser.add_argument('fastq_list',type=argparse.FileType('r'))
     parser.add_argument('--isolateinfo',type=argparse.FileType('r'))
+    parser.add_argument('--release-date',type=str)
     parser.add_argument('--new-project',action="store_true",help="Create a new project")
     parser.add_argument('-v','--verbose',action="store_true",help="Verbose output")
     parser.add_argument('--no-fastq',action='store_true', help="Don't upload fastqs")
@@ -347,7 +374,7 @@ if __name__ == "__main__":
                 print(ET.tostring(project.receipt).decode())
 
     ## Submit samples
-    samples = SampleSet()
+    samples = SampleSet(args.release_date)
     experiments = ExperimentSet(project.alias, user_variables['centre_name'])
     runs = RunSet(user_variables['centre_name'])
     files = parse_fastq_list(args.fastq_list)
@@ -373,5 +400,3 @@ if __name__ == "__main__":
 
     db.commit()
     
-
-
